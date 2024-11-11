@@ -1,21 +1,62 @@
 #!/usr/bin/env node
-import 'source-map-support/register';
-import * as cdk from 'aws-cdk-lib';
-import { PocStack } from '../lib/poc-stack';
+import "source-map-support/register";
+import * as cdk from "aws-cdk-lib";
+import { PocStack } from "../lib/poc-stack";
+import { CDKContext } from "./config/types";
 
-const app = new cdk.App();
-new PocStack(app, 'PocStack', {
-  /* If you don't specify 'env', this stack will be environment-agnostic.
-   * Account/Region-dependent features and context lookups will not work,
-   * but a single synthesized template can be deployed anywhere. */
+import * as gitBranch from "git-branch";
+// Get CDK Context based on git branch
+export const getContext = async (app: cdk.App): Promise<CDKContext> => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const currentBranch = await gitBranch();
+      console.log(`Current git branch: ${currentBranch}`);
 
-  /* Uncomment the next line to specialize this stack for the AWS Account
-   * and Region that are implied by the current CLI configuration. */
-  // env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+      const environment = app.node
+        .tryGetContext("environments")
+        .find((e: any) => e.branchName === currentBranch);
+      console.log("Environment: ");
+      console.log(JSON.stringify(environment, null, 4));
 
-  /* Uncomment the next line if you know exactly what Account and Region you
-   * want to deploy the stack to. */
-  // env: { account: '123456789012', region: 'us-east-1' },
+      const globals = app.node.tryGetContext("globals");
+      console.log("Globals: ");
+      console.log(JSON.stringify(globals, null, 4));
 
-  /* For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html */
-});
+      return resolve({ ...globals, ...environment });
+    } catch (error) {
+      console.error(error);
+      return reject();
+    }
+  });
+};
+
+// Create stacks
+const createStacks = async () => {
+  try {
+    const app = new cdk.App();
+    const context = await getContext(app);
+
+    const tags: any = {
+      Environment: context.environment,
+    };
+
+    const stackName = `${context.appName}-stack-${context.environment}`;
+
+    const stackProps: cdk.StackProps = {
+      env: {
+        region: context.region,
+        account: context.accountNumber,
+      },
+      stackName: stackName,
+      description: `This is the ${context.environment} stack description for ${context.appName} App`,
+      tags,
+    };
+
+    new PocStack(app, stackName, stackProps, context);
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+// HERE BE DRAGONS
+createStacks();
